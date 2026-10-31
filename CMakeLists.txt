@@ -33,6 +33,7 @@ set(iokitd_sources
 	src/IOIterator.cpp
 	src/IOService.mm
 	src/IORegistryEntry.mm
+	src/IOPlatformExpertDevice.mm
 	src/IODisplayConnect.mm
 	src/IODisplayConnectX11.mm
 	src/PowerAssertions.mm

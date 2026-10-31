@@ -513,3 +513,71 @@ kern_return_t is_io_registry_entry_get_property_bin
     return kr;
 }
 
+/*
+ * IOKitLib selected io_registry_entry_get_property_bin_buf (the -buf RPC) for
+ * IORegistryEntryCreateCFProperty when IOKIT_HAS_GET_PROPERTY_WITH_BUF is
+ * compiled in. Native XNU copies the serialized property into the caller's
+ * buffer when it fits and otherwise returns it out-of-line. This userland
+ * server has no copyout into the caller's address space, so it always returns
+ * the property out-of-line and reports that the caller's buffer was unused;
+ * IOKitLib consumes the out-of-line data first.
+ */
+kern_return_t is_io_registry_entry_get_property_bin_buf
+(
+	mach_port_t registry_entry,
+	io_name_t plane,
+	io_name_t property_name,
+	uint32_t options,
+	mach_vm_address_t buf,
+	mach_vm_size_t *bufsize,
+	io_buf_ptr_t *properties,
+	mach_msg_type_number_t *propertiesCnt
+)
+{
+	(void) buf;
+
+	*properties = nullptr;
+	*propertiesCnt = 0;
+
+	IORegistryEntry* e = dynamic_cast<IORegistryEntry*>(IOObject::lookup(registry_entry));
+	if (!e)
+		return kIOReturnBadArgument;
+
+	NSString* propName = [NSString stringWithUTF8String: property_name];
+	id value = nil;
+
+	if ((options & kIORegistryIterateRecursively) && plane[0])
+	{
+		NSDictionary* found = findKey(e, plane, propName);
+		if (found)
+			value = [found objectForKey: propName];
+	}
+	else
+	{
+		NSDictionary* props = e->getProperties();
+		value = [props objectForKey: propName];
+	}
+
+	if (!value)
+		return kIOReturnNotFound;
+
+	CFDataRef data = IOCFSerialize(value, kIOCFSerializeToBinary);
+	if (!data)
+		return kIOReturnUnsupported;
+
+	*propertiesCnt = CFDataGetLength(data);
+	kern_return_t kr = vm_allocate(mach_task_self(), (vm_address_t*) properties, *propertiesCnt, true);
+
+	if (kr == KERN_SUCCESS)
+		memcpy(*properties, CFDataGetBytePtr(data), *propertiesCnt);
+	else
+		*propertiesCnt = 0;
+
+	CFRelease(data);
+
+	if (bufsize)
+		*bufsize = 0;
+
+	return kr;
+}
+
